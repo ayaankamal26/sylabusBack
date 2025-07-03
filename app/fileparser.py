@@ -4,7 +4,7 @@ import json
 from typing import List, Dict
 import pdfplumber
 import docx
-
+import re
 
 
 def extract_text_from_pdf(file_path: str) -> str:
@@ -35,27 +35,34 @@ def parse_file(file_path: str) -> List[dict]:
 
 
 def run_local_llm_parser(text: str) -> list[dict]:
-    prompt = f"""
-Read the following syllabus and extract all assignments and exams. If the date given in the sylabus does not contain a year. Assume the year is the next time
+    notrerun = False
+    while(notrerun == False):
+        prompt = f"""
+Read the following syllabus and extract all assignments and exams. If the date given in the syllabus does not contain a year, assume the year is the next time
 that date will occur. Today is July 2, 2025.
+Return ONLY a JSON array with each entry having:
+course_name
+assignment_title
+due_date (YYYY-MM-DD format)
 
-Return a JSON array with each entry having:
-- title
-- due_date (YYYY-MM-DD format)
+Return only the JSON array. Do not include any explanation or formatting. Be sure to not include any extra backticks or markdown fences (```). I want PURE JSON
 
 Syllabus:
 \"\"\"
 {text}
 \"\"\"
-"""
+    """
 
-    response = ollama.chat(
-        model='mistral',
-        messages=[{"role": "user", "content": prompt}]
-    )
-
-    try:
-        return json.loads(response['message']['content'])
-    except json.JSONDecodeError:
-        print("Could not parse JSON output")
-        return []
+        response = ollama.chat(
+            model='mistral',
+            messages=[{"role": "user", "content": prompt}]
+        )
+        raw_content = response["message"].content if hasattr(response["message"], "content") else response["message"]["content"]
+        notrerun = True
+        match = re.search(r"```(?:json)?\s*(\[.*?\])\s*```", raw_content, re.DOTALL)
+        if match:
+            raw_content = match.group(1)
+        try:
+            return json.loads(raw_content)
+        except json.JSONDecodeError as e:
+            notrerun = False
